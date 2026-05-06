@@ -31,6 +31,7 @@ STYLES = {
 STYLE_ORDER = ["bold_dramatic", "clean_minimal", "vibrant_energetic"]
 
 async def generate_single_thumbnail(thumbnail_id: str, prompt:str, headshot_url: str):
+     
     # DB mark -> generating
     with Session(engine) as session:
         thumb = session.get(Thumbnail, thumbnail_id)
@@ -51,7 +52,7 @@ async def generate_single_thumbnail(thumbnail_id: str, prompt:str, headshot_url:
         url = upload_file(
             file_bytes=image_byte,
             file_name=f"{thumbnail_id}.png",
-            folder_path=f"thumbnails/{job_id}/",
+            folder=f"thumbnails/{job_id}/",
         ) 
         # DB call save the url = mark uploaded     
         with Session(engine) as session:
@@ -72,7 +73,7 @@ async def generate_single_thumbnail(thumbnail_id: str, prompt:str, headshot_url:
             session.commit()
 
 async def process_job(job_id: str):
-    # make job as processing
+    # mark job as processing
     # find all thumbnails for this job
     # start one worker for each thumbnail
     # wait for all workers to finish
@@ -106,4 +107,3 @@ async def process_job(job_id: str):
             job.status = "failed" if all_failed else "completed"
             session.add(job)
             session.commit()
-        
