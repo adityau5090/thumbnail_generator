@@ -88,6 +88,8 @@ async def create_job(request: CreateJobRequest, session: Session = Depends(get_s
 
     session.commit()
     asyncio.create_task(process_job(job_id=job.id))
+
+    return {"job_id": job.id}
      
 
 @router.get("/jobs/{job_id}", response_model=JobResponse)

@@ -7,6 +7,8 @@ from models import Job, Thumbnail
 from services.openai_service import generate_thumbnail
 from services.imagekit_service import upload_file
 
+logging.basicConfig(level=logging.INFO)
+
 logger = logging.getLogger(__name__)
 
 STYLES = {
@@ -22,88 +24,173 @@ STYLES = {
         "approachable and professional."
     ),
     "vibrant_energetic": (
-        "Create a vibrant, energetic YouTube thumbnail with colorful gradients,"
-        "dynamic angles, eye-catching pop-art style-colors, and energetic"
-        "composition. The person should have an excited or engaging expression"
+        "Create a vibrant, energetic YouTube thumbnail with colorful gradients, "
+        "dynamic angles, eye-catching pop-art style-colors, and energetic "
+        "composition. The person should have an excited or engaging expression."
     )
 }
 
 STYLE_ORDER = ["bold_dramatic", "clean_minimal", "vibrant_energetic"]
 
-async def generate_single_thumbnail(thumbnail_id: str, prompt:str, headshot_url: str):
-     
-    # DB mark -> generating
+
+async def generate_single_thumbnail(
+    thumbnail_id: str,
+    prompt: str,
+    headshot_url: str
+):
+
+    logger.info(f"[{thumbnail_id}] Starting thumbnail generation")
+
+    # mark generating
     with Session(engine) as session:
         thumb = session.get(Thumbnail, thumbnail_id)
+
+        if not thumb:
+            logger.error(f"[{thumbnail_id}] Thumbnail not found in DB")
+            return
+
         thumb.status = "generating"
+
         style_name = thumb.style_name
+
+        logger.info(f"[{thumbnail_id}] Style selected: {style_name}")
+
         session.add(thumb)
         session.commit()
-    
-    style_prompt = STYLES[style_name]
 
-    # AI call
+    style_prompt = STYLES.get(style_name)
+
+    if not style_prompt:
+        logger.error(f"[{thumbnail_id}] Invalid style name: {style_name}")
+        return
+
     try:
-        image_byte = await generate_thumbnail(prompt, style_prompt, headshot_url)
+        logger.info(f"[{thumbnail_id}] Calling AI generation...")
+
+        image_bytes = await generate_thumbnail(
+            prompt,
+            style_prompt,
+            headshot_url
+        )
+
+        logger.info(f"[{thumbnail_id}] AI generation completed")
+
+        logger.info(f"[{thumbnail_id}] Image bytes type: {type(image_bytes)}")
+
         with Session(engine) as session:
             thumb = session.get(Thumbnail, thumbnail_id)
+
+            if not thumb:
+                logger.error(f"[{thumbnail_id}] Thumbnail missing before upload")
+                return
+
             job_id = thumb.job_id
-        # upload this image    
+
+        logger.info(f"[{thumbnail_id}] Uploading image to ImageKit...")
+
         url = upload_file(
-            file_bytes=image_byte,
+            file_bytes=image_bytes,
             file_name=f"{thumbnail_id}.png",
             folder=f"thumbnails/{job_id}/",
-        ) 
-        # DB call save the url = mark uploaded     
+        )
+
+        logger.info(f"[{thumbnail_id}] Upload successful: {url}")
+
+        # save final result
         with Session(engine) as session:
             thumb = session.get(Thumbnail, thumbnail_id)
+
             thumb.imagekit_url = url
             thumb.status = "uploaded"
+
             session.add(thumb)
             session.commit()
-        logger.info(f"Thumbnail {thumbnail_id} generated and uploaded successfully.")    
+
+        logger.info(
+            f"[{thumbnail_id}] Thumbnail generated and uploaded successfully"
+        )
 
     except Exception as e:
-        logger.error(f"Error generating thumbnail {thumbnail_id} : {e}")
+        logger.exception(
+            f"[{thumbnail_id}] Error generating thumbnail: {e}"
+        )
+
         with Session(engine) as session:
             thumb = session.get(Thumbnail, thumbnail_id)
-            thumb.status = "error"
-            thumb.error_message = str(e)[:500]
-            session.add(thumb)
-            session.commit()
+
+            if thumb:
+                thumb.status = "error"
+                thumb.error_message = str(e)[:500]
+
+                session.add(thumb)
+                session.commit()
+
 
 async def process_job(job_id: str):
-    # mark job as processing
-    # find all thumbnails for this job
-    # start one worker for each thumbnail
-    # wait for all workers to finish
-    # mark job as completed/fialed
+
+    logger.info(f"[JOB {job_id}] Processing started")
+
     with Session(engine) as session:
+
         job = session.get(Job, job_id)
+
+        if not job:
+            logger.error(f"[JOB {job_id}] Job not found")
+            return
+
         job.status = "processing"
+
         prompt = job.prompt
         headshot_url = job.headshot_url
+
+        logger.info(f"[JOB {job_id}] Prompt: {prompt}")
+
         session.add(job)
         session.commit()
 
         thumbnails = session.exec(
             select(Thumbnail).where(Thumbnail.job_id == job_id)
+        ).all()
+
+        thumbnail_ids = [t.id for t in thumbnails]
+
+        logger.info(
+            f"[JOB {job_id}] Found {len(thumbnail_ids)} thumbnails"
         )
-        thumbnails_ids = [t.id for t in thumbnails]
 
-        tasks = [
-            generate_single_thumbnail(tid, prompt, headshot_url)
-            for tid in thumbnails_ids
-        ]
+    tasks = [
+        generate_single_thumbnail(
+            tid,
+            prompt,
+            headshot_url
+        )
+        for tid in thumbnail_ids
+    ]
 
-        await asyncio.gather(*tasks, return_exceptions=True)
+    logger.info(f"[JOB {job_id}] Launching async tasks")
 
-        with Session(engine) as session:
-            thumbnails = session.exec(
-                select(Thumbnail).where(Thumbnail.job_id == job_id)
-            ).all()
-            all_failed = all(t.status == 'error' for t in thumbnails)
-            job = session.get(Job, job_id)
-            job.status = "failed" if all_failed else "completed"
-            session.add(job)
-            session.commit()
+    results = await asyncio.gather(
+        *tasks,
+        return_exceptions=True
+    )
+
+    logger.info(f"[JOB {job_id}] Async tasks completed")
+
+    logger.info(f"[JOB {job_id}] Results: {results}")
+
+    with Session(engine) as session:
+
+        thumbnails = session.exec(
+            select(Thumbnail).where(Thumbnail.job_id == job_id)
+        ).all()
+
+        all_failed = all(t.status == "error" for t in thumbnails)
+
+        job = session.get(Job, job_id)
+
+        job.status = "failed" if all_failed else "completed"
+
+        session.add(job)
+        session.commit()
+
+    logger.info(f"[JOB {job_id}] Final status: {job.status}")

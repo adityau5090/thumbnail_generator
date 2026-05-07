@@ -24,8 +24,8 @@ async def generate_thumbnail(prompt: str, style_prompt: str, headshot_url: str)-
             {
                 "role": "user",
                 "content": [
-                    { "type": "input_image", "url": headshot_url},
-                    { "type": "text", "text": full_prompt}
+                    { "type": "input_image", "image_url": headshot_url},
+                    { "type": "input_text", "text": full_prompt}
                 ]
             }
         ],
@@ -34,7 +34,7 @@ async def generate_thumbnail(prompt: str, style_prompt: str, headshot_url: str)-
                 "type": "image_generation",
                 "model": "gpt-image-2",
                 "size": "1536x1024",
-                "quality": "standard",
+                "quality": "medium",
                 "output_format": "png"
             },
             
@@ -46,3 +46,31 @@ async def generate_thumbnail(prompt: str, style_prompt: str, headshot_url: str)-
             return base64.b64decode(item.result)
     
     raise RuntimeError("No image generation result found in the response")
+
+# import google.generativeai as genai
+# from config import GEMINI_API_KEY
+
+# genai.configure(api_key=GEMINI_API_KEY)
+
+# model = genai.GenerativeModel("gemini-2.5-flash-image")
+
+# async def generate_thumbnail(prompt, style_prompt, headshot_url):
+
+#     full_prompt = f"""
+#     {style_prompt}
+
+#     User request:
+#     {prompt}
+#     """
+
+#     response = model.generate_content([
+#         full_prompt,
+#         {
+#             "file_data": {
+#                 "mime_type": "image/jpeg",
+#                 "file_uri": headshot_url
+#             }
+#         }
+#     ])
+
+#     return response.candidates[0].content.parts[0].inline_data.data

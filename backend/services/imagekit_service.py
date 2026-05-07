@@ -6,7 +6,7 @@ imagekit = ImageKit(
 )
 
 def upload_file(file_bytes: bytes, file_name: str, folder: str, content_type: str = "image/png") -> str :
-    print(type(file_bytes))
+    # print(type(file_bytes))
     """Upload a file to ImageKit and return the CDN URL."""
     result = imagekit.files.upload(
         file=file_bytes,
